@@ -78,24 +78,30 @@ export const stripeProcessor: PaymentProcessor = {
     if (!signature) throw new Error("Missing stripe-signature header");
     const event = stripe().webhooks.constructEvent(rawBody, signature, env.STRIPE_WEBHOOK_SECRET);
 
-    const createdAt = new Date(event.created * 1000);
+    const base = { id: event.id, type: event.type, createdAt: new Date(event.created * 1000) };
+
+    // Event payloads can arrive out of order and `created` has only second precision, so the
+    // subscription is refetched and stamped with when it was read: the latest read always wins.
+    const current = async (subId: string) => {
+      const observedAt = new Date();
+      const sub = await stripe().subscriptions.retrieve(subId);
+      return { ...base, createdAt: observedAt, subscription: snapshot(sub) };
+    };
 
     switch (event.type) {
       case "checkout.session.completed": {
         const s = event.data.object;
-        if (s.mode !== "subscription" || !s.subscription) return { id: event.id, type: event.type, createdAt };
-        const subId = typeof s.subscription === "string" ? s.subscription : s.subscription.id;
-        const sub = await stripe().subscriptions.retrieve(subId);
-        return { id: event.id, type: event.type, createdAt, subscription: snapshot(sub) };
+        if (s.mode !== "subscription" || !s.subscription) return base;
+        return current(typeof s.subscription === "string" ? s.subscription : s.subscription.id);
       }
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted":
       case "customer.subscription.paused":
       case "customer.subscription.resumed":
-        return { id: event.id, type: event.type, createdAt, subscription: snapshot(event.data.object) };
+        return current(event.data.object.id);
       default:
-        return { id: event.id, type: event.type, createdAt };
+        return base;
     }
   },
 };

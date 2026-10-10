@@ -1,12 +1,13 @@
 "use server";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, lt, sql } from "drizzle-orm";
 import { revalidatePath } from "next/cache";
 import * as z from "zod";
 
 import { recordAudit } from "@/lib/audit";
 import { requireOrgPermission } from "@/lib/auth/session";
-import { assertWithinLimit } from "@/lib/billing/entitlements";
+import { getOrgPlan, getStorageUsageMb, PlanLimitError } from "@/lib/billing/entitlements";
+import { isWithinLimit } from "@/lib/billing/plans";
 import { file } from "@/lib/db/schema";
 import { withTenant } from "@/lib/db/tenant";
 import {
@@ -17,6 +18,7 @@ import {
   deleteObject,
   headObject,
   MAX_UPLOAD_BYTES,
+  PENDING_UPLOAD_TTL_MS,
   storageEnabled,
 } from "@/lib/storage";
 
@@ -31,23 +33,37 @@ const uploadInput = z.object({
 /**
  * Step 1 of an upload: validate, enforce storage limits and return a presigned PUT URL.
  * A `pending` row reserves the quota; the browser uploads directly to S3 and then calls
- * `confirmUpload` (or `abortUpload` on failure). Abandoned rows are removed by the cleanup job.
+ * `confirmUpload` (or `abortUpload` on failure). The quota check and reservation run under a
+ * per-org lock so concurrent requests can't both squeeze under the limit.
  */
 export async function requestUpload(slug: string, values: z.input<typeof uploadInput>) {
   return runAction(async () => {
     if (!storageEnabled) throw new ActionError("File storage is not configured.");
     const ctx = await requireOrgPermission(slug, { file: ["upload"] });
     const data = uploadInput.parse(values);
-    await assertWithinLimit(ctx.organization.id, "storageMb", data.size / (1024 * 1024));
-    const storageKey = buildStorageKey(ctx.organization.id, data.name);
-    const uploadUrl = await createUploadUrl(storageKey, data.contentType, data.size);
-    const [row] = await withTenant(ctx.organization.id, (tx) =>
-      tx
+    const orgId = ctx.organization.id;
+    const plan = await getOrgPlan(orgId);
+    const storageKey = buildStorageKey(orgId, data.name);
+    const { row, abandoned } = await withTenant(orgId, async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`storage:${orgId}`}))`);
+      // Also reclaim abandoned uploads here, so cleanup works without a worker (JOBS_MODE=inline).
+      const abandoned = await tx
+        .delete(file)
+        .where(and(eq(file.status, "pending"), lt(file.createdAt, new Date(Date.now() - PENDING_UPLOAD_TTL_MS))))
+        .returning({ storageKey: file.storageKey });
+      const limit = plan.limits.storageMb;
+      if (!isWithinLimit(limit, await getStorageUsageMb(tx), data.size / (1024 * 1024))) {
+        throw new PlanLimitError("storageMb", limit);
+      }
+      const [row] = await tx
         .insert(file)
-        .values({ ...data, organizationId: ctx.organization.id, uploadedById: ctx.user.id, storageKey })
-        .returning({ id: file.id }),
-    );
-    return { id: row!.id, uploadUrl };
+        .values({ ...data, organizationId: orgId, uploadedById: ctx.user.id, storageKey })
+        .returning({ id: file.id });
+      return { row: row!, abandoned };
+    });
+    await Promise.all(abandoned.map((f) => deleteObject(f.storageKey).catch(() => undefined)));
+    const uploadUrl = await createUploadUrl(storageKey, data.contentType, data.size);
+    return { id: row.id, uploadUrl };
   });
 }
 
@@ -68,7 +84,12 @@ export async function confirmUpload(slug: string, id: string) {
       throw new ActionError("Upload could not be verified. Please try again.");
     }
     await withTenant(ctx.organization.id, async (tx) => {
-      await tx.update(file).set({ status: "ready" }).where(eq(file.id, id));
+      const activated = await tx
+        .update(file)
+        .set({ status: "ready" })
+        .where(and(eq(file.id, id), eq(file.status, "pending")))
+        .returning({ id: file.id });
+      if (activated.length === 0) throw new ActionError("Upload not found");
       await recordAudit(
         {
           organizationId: ctx.organization.id,
@@ -99,9 +120,15 @@ export async function abortUpload(slug: string, id: string) {
   });
 }
 
+/** Deletes the object only if the row was still pending, so a concurrent confirm can't lose its file. */
 async function removePending(organizationId: string, id: string, storageKey: string) {
-  await withTenant(organizationId, (tx) => tx.delete(file).where(and(eq(file.id, id), eq(file.status, "pending"))));
-  await deleteObject(storageKey).catch(() => undefined);
+  const deleted = await withTenant(organizationId, (tx) =>
+    tx
+      .delete(file)
+      .where(and(eq(file.id, id), eq(file.status, "pending")))
+      .returning({ id: file.id }),
+  );
+  if (deleted.length > 0) await deleteObject(storageKey).catch(() => undefined);
 }
 
 export async function getDownloadUrl(slug: string, id: string) {

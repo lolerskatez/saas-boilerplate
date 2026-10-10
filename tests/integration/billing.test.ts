@@ -63,4 +63,14 @@ describe.skipIf(!hasDb)("handleWebhookEvent", async () => {
     );
     expect(entries).toHaveLength(2);
   });
+
+  it("serializes concurrent events so the newest snapshot wins", async () => {
+    const results = await Promise.all([
+      handleWebhookEvent("stripe", event("pro", "2026-01-01T12:04:00Z")),
+      handleWebhookEvent("stripe", event("free", "2026-01-01T12:03:00Z")),
+    ]);
+    expect(results[0]).toBe("processed");
+    expect(["processed", "stale"]).toContain(results[1]);
+    expect(await currentPlan()).toBe("pro");
+  });
 });
