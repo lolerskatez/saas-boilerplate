@@ -33,11 +33,12 @@ export async function handleWebhookEvent(provider: string, event: WebhookEvent):
     const snap = event.subscription;
     if (!snap) return "processed";
 
+    // Serializes events per org, including the first one when no subscription row exists to lock.
+    await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`billing:${snap.organizationId}`}))`);
     const [previous] = await tx
       .select({ plan: subscription.plan, status: subscription.status, lastEventAt: subscription.lastEventAt })
       .from(subscription)
-      .where(eq(subscription.organizationId, snap.organizationId))
-      .for("update");
+      .where(eq(subscription.organizationId, snap.organizationId));
     if (previous?.lastEventAt && previous.lastEventAt > event.createdAt) return "stale";
 
     const values = { ...snap, provider, lastEventAt: event.createdAt };
