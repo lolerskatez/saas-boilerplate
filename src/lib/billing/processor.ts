@@ -26,6 +26,8 @@ export interface SubscriptionSnapshot {
 export interface WebhookEvent {
   id: string;
   type: string;
+  /** When the provider created the event; used to ignore out-of-order deliveries. */
+  createdAt: Date;
   /** Present when the event changes an organization's subscription. */
   subscription?: SubscriptionSnapshot;
 }

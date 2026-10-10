@@ -10,7 +10,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 const hasDb = !!process.env.DATABASE_URL;
 
 describe.skipIf(!hasDb)("row-level security", async () => {
-  const { db, pool } = await import("@/lib/db");
+  const { db, pool, systemPool } = await import("@/lib/db");
   const { organization, project } = await import("@/lib/db/schema");
   const { withSystem, withTenant } = await import("@/lib/db/tenant");
   const orgA = `test-${randomUUID()}`;
@@ -27,7 +27,7 @@ describe.skipIf(!hasDb)("row-level security", async () => {
 
   afterAll(async () => {
     await db.delete(organization).where(sql`${organization.id} in (${orgA}, ${orgB})`);
-    await pool.end();
+    await Promise.all([pool.end(), systemPool.end()]);
   });
 
   it("only returns the current tenant's rows", async () => {
@@ -51,6 +51,14 @@ describe.skipIf(!hasDb)("row-level security", async () => {
       tx.update(project).set({ name: "hacked" }).where(eq(project.organizationId, orgB)).returning(),
     );
     expect(updated).toHaveLength(0);
+  });
+
+  it("cannot bypass RLS from the tenant connection", async () => {
+    const rows = await db.transaction(async (tx) => {
+      await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
+      return tx.select().from(project).where(eq(project.organizationId, orgA));
+    });
+    expect(rows).toHaveLength(0);
   });
 
   it("allows trusted system access across tenants", async () => {

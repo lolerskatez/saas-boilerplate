@@ -8,23 +8,23 @@ A production-ready, **multi-tenant** SaaS starter built on Next.js 16. It combin
 
 ## Features
 
-| Area | What you get |
-| --- | --- |
-| **Multi-tenancy** | Organizations with owner/admin/member roles, email invitations, org switcher, per-org URLs (`/dashboard/[slug]`) |
-| **Tenant isolation** | Postgres **Row-Level Security** on every tenant table — a forgotten `WHERE organization_id` can't leak data |
-| **Auth** | Self-hosted [Better Auth](https://better-auth.com): email/password, email verification, password reset, GitHub/Google OAuth, TOTP 2FA + backup codes, session management |
-| **RBAC** | Fine-grained permission statements (`project:create`, `billing:manage`, …) shared by server and client |
-| **Billing** | Per-organization Stripe subscriptions: checkout, customer portal, **idempotent webhooks**, plan limits (members/projects/API keys/storage); provider abstraction for Polar/Lemon Squeezy |
-| **Public API** | Hashed, scoped, expiring, revocable org **API keys** and a versioned REST API at `/api/v1` |
-| **Audit log** | Field-level diffs (`{ field: { from, to } }`) for every important change, written in the same transaction |
-| **Notifications** | In-app notifications (invites, role changes, billing events) |
-| **Background jobs** | [pg-boss](https://github.com/timgit/pg-boss) queues, retries and cron — Postgres only, no Redis. Inline mode for serverless |
-| **Email** | React Email templates sent via SMTP (Mailpit locally) or Resend |
-| **File uploads** | Presigned S3 uploads (AWS S3, Cloudflare R2, RustFS, MinIO) with per-plan storage limits |
-| **Super-admin** | Users/orgs tables, MRR/ARR and sign-up charts, ban/unban, promote, **impersonation** |
-| **UX** | Landing page + pricing, shadcn/ui, dark mode, i18n (en/es/fr) via next-intl |
-| **Quality** | Strict TypeScript, ESLint, Prettier, Vitest (unit + RLS integration), Playwright E2E, Lefthook, Commitlint, GitHub Actions CI |
-| **Ops** | Docker Compose dev stack, multi-stage Dockerfile (web + worker), env validation, security headers, structured logging (pino), health check |
+| Area                 | What you get                                                                                                                                                                             |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Multi-tenancy**    | Organizations with owner/admin/member roles, email invitations, org switcher, per-org URLs (`/dashboard/[slug]`)                                                                         |
+| **Tenant isolation** | Postgres **Row-Level Security** on every tenant table — a forgotten `WHERE organization_id` can't leak data                                                                              |
+| **Auth**             | Self-hosted [Better Auth](https://better-auth.com): email/password, email verification, password reset, GitHub/Google OAuth, TOTP 2FA + backup codes, session management                 |
+| **RBAC**             | Fine-grained permission statements (`project:create`, `billing:manage`, …) shared by server and client                                                                                   |
+| **Billing**          | Per-organization Stripe subscriptions: checkout, customer portal, **idempotent webhooks**, plan limits (members/projects/API keys/storage); provider abstraction for Polar/Lemon Squeezy |
+| **Public API**       | Hashed, scoped, expiring, revocable org **API keys** and a versioned REST API at `/api/v1`                                                                                               |
+| **Audit log**        | Field-level diffs (`{ field: { from, to } }`) for every important change, written in the same transaction                                                                                |
+| **Notifications**    | In-app notifications (invites, role changes, billing events)                                                                                                                             |
+| **Background jobs**  | [pg-boss](https://github.com/timgit/pg-boss) queues, retries and cron — Postgres only, no Redis. Inline mode for serverless                                                              |
+| **Email**            | React Email templates sent via SMTP (Mailpit locally) or Resend                                                                                                                          |
+| **File uploads**     | Presigned S3 uploads (AWS S3, Cloudflare R2, RustFS, MinIO) with per-plan storage limits                                                                                                 |
+| **Super-admin**      | Users/orgs tables, MRR/ARR and sign-up charts, ban/unban, promote, **impersonation**                                                                                                     |
+| **UX**               | Landing page + pricing, shadcn/ui, dark mode, i18n (en/es/fr) via next-intl                                                                                                              |
+| **Quality**          | Strict TypeScript, ESLint, Prettier, Vitest (unit + RLS integration), Playwright E2E, Lefthook, Commitlint, GitHub Actions CI                                                            |
+| **Ops**              | Docker Compose dev stack, multi-stage Dockerfile (web + worker), env validation, security headers, structured logging (pino), health check                                               |
 
 ## Quick start
 
@@ -40,23 +40,25 @@ npm run worker                             # in a second terminal: background jo
 ```
 
 Sign up, verify your email in Mailpit, create an organization and you're in. Add your email to `ADMIN_EMAILS`
-before signing up to become a super-admin (`/admin`).
+to become a super-admin (`/admin`); the role is granted only once that address is verified (email link or
+OAuth), so with `AUTH_REQUIRE_EMAIL_VERIFICATION=false` promote the first admin manually:
+`UPDATE "user" SET role = 'admin' WHERE email = 'you@example.com';`.
 
 Local S3: create the `uploads` bucket in the RustFS console (`rustfsadmin` / `rustfsadmin`) and allow CORS from
 `http://localhost:3000`, or point the `S3_*` variables at any S3-compatible provider.
 
 ## Scripts
 
-| Script | Description |
-| --- | --- |
-| `dev` / `build` / `start` | Next.js |
-| `worker` | pg-boss worker (queues + cron) |
-| `lint` / `typecheck` / `format` | Code quality |
-| `test` | Vitest unit tests + RLS integration tests (needs a migrated DB) |
-| `test:e2e` | Playwright (set `AUTH_REQUIRE_EMAIL_VERIFICATION=false`) |
-| `db:generate` / `db:migrate` / `db:studio` | Drizzle Kit |
-| `auth:generate` | Regenerate the Better Auth schema after adding plugins |
-| `email:dev` | Preview email templates at http://localhost:3001 |
+| Script                                     | Description                                                     |
+| ------------------------------------------ | --------------------------------------------------------------- |
+| `dev` / `build` / `start`                  | Next.js                                                         |
+| `worker`                                   | pg-boss worker (queues + cron)                                  |
+| `lint` / `typecheck` / `format`            | Code quality                                                    |
+| `test`                                     | Vitest unit tests + RLS integration tests (needs a migrated DB) |
+| `test:e2e`                                 | Playwright (set `AUTH_REQUIRE_EMAIL_VERIFICATION=false`)        |
+| `db:generate` / `db:migrate` / `db:studio` | Drizzle Kit                                                     |
+| `auth:generate`                            | Regenerate the Better Auth schema after adding plugins          |
+| `email:dev`                                | Preview email templates at http://localhost:3001                |
 
 ## Architecture
 
@@ -94,8 +96,10 @@ const projects = await withTenant(org.id, (tx) => tx.select().from(project)); //
 ```
 
 Queries outside `withTenant` see **no** tenant rows, and inserts into another tenant fail. `withSystem` bypasses
-RLS for trusted cross-tenant code (API key lookup, webhooks, admin). The app must connect as a role that is **not**
-a superuser and lacks `BYPASSRLS` (see `docker/postgres/init.sql`). `tests/integration/rls.test.ts` proves it.
+RLS for trusted cross-tenant code (API key lookup, background jobs) by using a separate connection,
+`DATABASE_SYSTEM_URL`, as a `BYPASSRLS` role. `DATABASE_URL` must use a role that is **not** a superuser and lacks
+`BYPASSRLS`, so tenant-scoped SQL has no way to switch the bypass on (see `docker/postgres/init.sql`).
+`tests/integration/rls.test.ts` proves it.
 
 **Adding a tenant-scoped table:** add it to `src/lib/db/schema/app.ts` with an `organizationId` column, run
 `npm run db:generate`, then `npx drizzle-kit generate --custom` and enable RLS + the `tenant_isolation` policy
@@ -118,10 +122,10 @@ To add another provider, implement `PaymentProcessor` (`src/lib/billing/processo
 curl http://localhost:3000/api/v1/projects -H "Authorization: Bearer sk_live_..."
 ```
 
-| Method | Path | Scope |
-| --- | --- | --- |
-| GET | `/api/v1/me` | any |
-| GET / POST | `/api/v1/projects` | `projects:read` / `projects:write` |
+| Method               | Path                   | Scope                              |
+| -------------------- | ---------------------- | ---------------------------------- |
+| GET                  | `/api/v1/me`           | any                                |
+| GET / POST           | `/api/v1/projects`     | `projects:read` / `projects:write` |
 | GET / PATCH / DELETE | `/api/v1/projects/:id` | `projects:read` / `projects:write` |
 
 Errors use `{ "error": { "code", "message" } }`; plan limits return `402`.

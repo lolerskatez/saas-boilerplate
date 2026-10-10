@@ -78,22 +78,24 @@ export const stripeProcessor: PaymentProcessor = {
     if (!signature) throw new Error("Missing stripe-signature header");
     const event = stripe().webhooks.constructEvent(rawBody, signature, env.STRIPE_WEBHOOK_SECRET);
 
+    const createdAt = new Date(event.created * 1000);
+
     switch (event.type) {
       case "checkout.session.completed": {
         const s = event.data.object;
-        if (s.mode !== "subscription" || !s.subscription) return { id: event.id, type: event.type };
+        if (s.mode !== "subscription" || !s.subscription) return { id: event.id, type: event.type, createdAt };
         const subId = typeof s.subscription === "string" ? s.subscription : s.subscription.id;
         const sub = await stripe().subscriptions.retrieve(subId);
-        return { id: event.id, type: event.type, subscription: snapshot(sub) };
+        return { id: event.id, type: event.type, createdAt, subscription: snapshot(sub) };
       }
       case "customer.subscription.created":
       case "customer.subscription.updated":
       case "customer.subscription.deleted":
       case "customer.subscription.paused":
       case "customer.subscription.resumed":
-        return { id: event.id, type: event.type, subscription: snapshot(event.data.object) };
+        return { id: event.id, type: event.type, createdAt, subscription: snapshot(event.data.object) };
       default:
-        return { id: event.id, type: event.type };
+        return { id: event.id, type: event.type, createdAt };
     }
   },
 };

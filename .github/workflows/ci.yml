@@ -23,6 +23,7 @@ jobs:
           --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 10
     env:
       DATABASE_URL: postgresql://app:app@localhost:5432/saas
+      DATABASE_SYSTEM_URL: postgresql://app_system:app_system@localhost:5432/saas
       BETTER_AUTH_SECRET: ci-secret-ci-secret-ci-secret-ci-secret
       AUTH_REQUIRE_EMAIL_VERIFICATION: "false"
       JOBS_MODE: inline

@@ -1,6 +1,6 @@
 import { sql } from "drizzle-orm";
 
-import { db, type Transaction } from "./index";
+import { db, systemDb, type Transaction } from "./index";
 
 /**
  * Runs `fn` in a transaction scoped to a single organization.
@@ -18,12 +18,9 @@ export async function withTenant<T>(organizationId: string, fn: (tx: Transaction
 }
 
 /**
- * Runs `fn` with RLS bypassed. Only for trusted system code paths that legitimately span
- * tenants: API key lookup, webhooks, background jobs and the super-admin dashboard.
+ * Runs `fn` with RLS bypassed, on the `DATABASE_SYSTEM_URL` connection (a BYPASSRLS role).
+ * Only for trusted code paths that legitimately span tenants: API key lookup and background jobs.
  */
 export async function withSystem<T>(fn: (tx: Transaction) => Promise<T>): Promise<T> {
-  return db.transaction(async (tx) => {
-    await tx.execute(sql`select set_config('app.bypass_rls', 'on', true)`);
-    return fn(tx);
-  });
+  return systemDb.transaction(fn);
 }
