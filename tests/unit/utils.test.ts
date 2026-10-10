@@ -16,6 +16,10 @@ describe("utils", () => {
     expect(safeRedirect("/dashboard/acme")).toBe("/dashboard/acme");
     expect(safeRedirect("https://evil.com")).toBe("/dashboard");
     expect(safeRedirect("//evil.com")).toBe("/dashboard");
+    expect(safeRedirect("/\\evil.com")).toBe("/dashboard");
+    expect(safeRedirect("/%5Cevil.com")).toBe("/%5Cevil.com");
+    expect(safeRedirect("/\tevil")).toBe("/dashboard");
+    expect(safeRedirect("/a?b=1#c")).toBe("/a?b=1#c");
     expect(safeRedirect(undefined, "/onboarding")).toBe("/onboarding");
   });
 });

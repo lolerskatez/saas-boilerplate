@@ -2,7 +2,7 @@ import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 
 import { and, eq, isNull } from "drizzle-orm";
 
-import { apiKey } from "@/lib/db/schema";
+import { apiKey, member } from "@/lib/db/schema";
 import { withSystem } from "@/lib/db/tenant";
 
 import type { ApiKeyScope } from "./api-key-scopes";
@@ -38,16 +38,21 @@ export interface ApiKeyPrincipal {
   scopes: string[];
 }
 
-/** Resolves a bearer API key to its organization. Returns null if missing, revoked or expired. */
+/**
+ * Resolves a bearer API key to its organization. Returns null if missing, revoked, expired, or
+ * if its creator is no longer a member of the organization.
+ */
 export async function verifyApiKey(key: string | null | undefined): Promise<ApiKeyPrincipal | null> {
   if (!key || !key.startsWith(KEY_PREFIX)) return null;
   const hashed = hashApiKey(key);
   return withSystem(async (tx) => {
-    const [row] = await tx
-      .select()
+    const [found] = await tx
+      .select({ key: apiKey })
       .from(apiKey)
+      .innerJoin(member, and(eq(member.userId, apiKey.createdById), eq(member.organizationId, apiKey.organizationId)))
       .where(and(eq(apiKey.hashedKey, hashed), isNull(apiKey.revokedAt)))
       .limit(1);
+    const row = found?.key;
     if (!row || !safeEqualHex(row.hashedKey, hashed)) return null;
     if (row.expiresAt && row.expiresAt < new Date()) return null;
     await tx.update(apiKey).set({ lastUsedAt: new Date() }).where(eq(apiKey.id, row.id));

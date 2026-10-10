@@ -1,4 +1,4 @@
-import { desc } from "drizzle-orm";
+import { desc, eq } from "drizzle-orm";
 import { Trash2 } from "lucide-react";
 import { getTranslations } from "next-intl/server";
 
@@ -25,7 +25,9 @@ export default async function FilesPage({ params }: { params: Promise<{ slug: st
   const ctx = await getOrgContext(slug);
   const [t, files] = await Promise.all([
     getTranslations("dashboard"),
-    withTenant(ctx.organization.id, (tx) => tx.select().from(file).orderBy(desc(file.createdAt))),
+    withTenant(ctx.organization.id, (tx) =>
+      tx.select().from(file).where(eq(file.status, "ready")).orderBy(desc(file.createdAt)),
+    ),
   ]);
   return (
     <>

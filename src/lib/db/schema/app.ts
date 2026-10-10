@@ -36,6 +36,8 @@ export const subscription = pgTable(
     interval: text(),
     currentPeriodEnd: timestamp({ withTimezone: true }),
     cancelAtPeriodEnd: boolean().notNull().default(false),
+    /** Creation time of the last applied provider event; older events are ignored. */
+    lastEventAt: timestamp({ withTimezone: true }),
     ...timestamps,
   },
   (t) => [index("subscription_customer_idx").on(t.customerId)],
@@ -128,6 +130,10 @@ export const file = pgTable(
     contentType: text().notNull(),
     size: bigint({ mode: "number" }).notNull(),
     storageKey: text().notNull().unique(),
+    /** `pending` until the browser's direct upload is confirmed by `confirmUpload`. */
+    status: text({ enum: ["pending", "ready"] })
+      .notNull()
+      .default("pending"),
     createdAt: timestamp({ withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("file_org_idx").on(t.organizationId)],

@@ -1,4 +1,4 @@
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 
 import { recordAudit } from "@/lib/audit";
 import { db } from "@/lib/db";
@@ -13,53 +13,63 @@ export const processors: Record<string, PaymentProcessor> = { stripe: stripeProc
 
 export const paymentProcessor: PaymentProcessor = stripeProcessor;
 
+export type WebhookResult = "processed" | "duplicate" | "stale";
+
 /**
- * Applies a webhook event exactly once. The event id insert and the subscription upsert share a
- * transaction, so a crash mid-way lets the provider's retry re-process it cleanly.
+ * Applies a webhook event exactly once. The event id, subscription upsert, audit entry and
+ * notifications share one transaction, so a failure anywhere lets the provider's retry redo
+ * everything. Events older than the last applied one are recorded but ignored, because
+ * providers do not guarantee delivery order.
  */
-export async function handleWebhookEvent(provider: string, event: WebhookEvent): Promise<"processed" | "duplicate"> {
-  const result = await db.transaction(async (tx) => {
+export async function handleWebhookEvent(provider: string, event: WebhookEvent): Promise<WebhookResult> {
+  return db.transaction(async (tx) => {
     const inserted = await tx
       .insert(processedWebhookEvent)
       .values({ provider, eventId: event.id, eventType: event.type })
       .onConflictDoNothing()
       .returning({ id: processedWebhookEvent.id });
-    if (inserted.length === 0) return { status: "duplicate" as const };
+    if (inserted.length === 0) return "duplicate";
 
     const snap = event.subscription;
-    if (!snap) return { status: "processed" as const };
+    if (!snap) return "processed";
 
     const [previous] = await tx
-      .select({ plan: subscription.plan, status: subscription.status })
+      .select({ plan: subscription.plan, status: subscription.status, lastEventAt: subscription.lastEventAt })
       .from(subscription)
-      .where(eq(subscription.organizationId, snap.organizationId));
+      .where(eq(subscription.organizationId, snap.organizationId))
+      .for("update");
+    if (previous?.lastEventAt && previous.lastEventAt > event.createdAt) return "stale";
 
-    const values = { ...snap, provider };
+    const values = { ...snap, provider, lastEventAt: event.createdAt };
     await tx
       .insert(subscription)
       .values(values)
       .onConflictDoUpdate({ target: subscription.organizationId, set: values });
-    return { status: "processed" as const, snap, previous };
-  });
 
-  if (result.status === "processed" && result.snap) {
-    const { snap, previous } = result;
     if (previous?.plan !== snap.plan || previous?.status !== snap.status) {
-      await recordAudit({
-        organizationId: snap.organizationId,
-        actor: { type: "system" },
-        action: "billing.subscription_changed",
-        entityType: "subscription",
-        entityId: snap.subscriptionId,
-        before: previous ?? null,
-        after: { plan: snap.plan, status: snap.status },
-      });
-      await notifyOrgAdmins(snap.organizationId, {
-        type: "billing",
-        title: "Subscription updated",
-        body: `Your organization is now on the ${PLANS[snap.plan].name} plan (${snap.status}).`,
-      });
+      await tx.execute(sql`select set_config('app.current_org_id', ${snap.organizationId}, true)`);
+      await recordAudit(
+        {
+          organizationId: snap.organizationId,
+          actor: { type: "system" },
+          action: "billing.subscription_changed",
+          entityType: "subscription",
+          entityId: snap.subscriptionId,
+          before: previous ? { plan: previous.plan, status: previous.status } : null,
+          after: { plan: snap.plan, status: snap.status },
+        },
+        tx,
+      );
+      await notifyOrgAdmins(
+        snap.organizationId,
+        {
+          type: "billing",
+          title: "Subscription updated",
+          body: `Your organization is now on the ${PLANS[snap.plan].name} plan (${snap.status}).`,
+        },
+        { tx },
+      );
     }
-  }
-  return result.status;
+    return "processed";
+  });
 }

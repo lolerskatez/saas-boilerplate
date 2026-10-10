@@ -1,4 +1,10 @@
-import { DeleteObjectCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import {
+  DeleteObjectCommand,
+  GetObjectCommand,
+  HeadObjectCommand,
+  PutObjectCommand,
+  S3Client,
+} from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 import { env } from "@/lib/env";
@@ -57,5 +63,19 @@ export async function createDownloadUrl(key: string, fileName: string) {
 export async function deleteObject(key: string) {
   await client().send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
 }
+
+/** Returns the stored object's size in bytes, or null if it does not exist. */
+export async function headObject(key: string): Promise<number | null> {
+  try {
+    const res = await client().send(new HeadObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+    return res.ContentLength ?? 0;
+  } catch (err) {
+    if ((err as { name?: string }).name === "NotFound") return null;
+    throw err;
+  }
+}
+
+/** Pending uploads older than this are treated as abandoned and cleaned up. */
+export const PENDING_UPLOAD_TTL_MS = 60 * 60 * 1000;
 
 export { client as s3Client };

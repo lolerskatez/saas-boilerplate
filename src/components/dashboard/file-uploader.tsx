@@ -6,7 +6,7 @@ import { useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
-import { requestUpload } from "@/lib/actions/files";
+import { abortUpload, confirmUpload, requestUpload } from "@/lib/actions/files";
 
 export function FileUploader({ slug, label, accept }: { slug: string; label: string; accept: string }) {
   const router = useRouter();
@@ -21,12 +21,16 @@ export function FileUploader({ slug, label, accept }: { slug: string; label: str
     try {
       const res = await requestUpload(slug, { name: file.name, contentType: file.type, size: file.size });
       if (!res.ok) throw new Error(res.error);
-      const put = await fetch(res.data.uploadUrl, {
-        method: "PUT",
-        body: file,
-        headers: { "Content-Type": file.type },
-      });
-      if (!put.ok) throw new Error(`Upload failed (${put.status})`);
+      const { id, uploadUrl } = res.data;
+      const put = await fetch(uploadUrl, { method: "PUT", body: file, headers: { "Content-Type": file.type } }).catch(
+        () => null,
+      );
+      if (!put?.ok) {
+        await abortUpload(slug, id);
+        throw new Error(put ? `Upload failed (${put.status})` : "Upload failed");
+      }
+      const confirmed = await confirmUpload(slug, id);
+      if (!confirmed.ok) throw new Error(confirmed.error);
       toast.success(`${file.name} uploaded`);
       router.refresh();
     } catch (err) {

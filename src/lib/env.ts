@@ -6,6 +6,7 @@ const optional = z.string().min(1).optional();
 export const env = createEnv({
   server: {
     DATABASE_URL: z.url(),
+    DATABASE_SYSTEM_URL: z.url(),
     BETTER_AUTH_SECRET: z.string().min(32),
     ADMIN_EMAILS: z
       .string()

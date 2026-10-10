@@ -1,4 +1,5 @@
 import { betterAuth } from "better-auth";
+import { and, eq, isNull } from "drizzle-orm";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { nextCookies } from "better-auth/next-js";
 import { admin, organization, twoFactor } from "better-auth/plugins";
@@ -18,6 +19,10 @@ const socialProviders = {
     ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET } }
     : {}),
 };
+
+function isAdminEmail(user: { email: string; emailVerified?: boolean | null }) {
+  return !!user.emailVerified && env.ADMIN_EMAILS.includes(user.email.toLowerCase());
+}
 
 // Lazily imported to avoid an import cycle (these modules depend on the db schema / auth types).
 const audit = () => import("@/lib/audit");
@@ -52,10 +57,15 @@ export const auth = betterAuth({
   databaseHooks: {
     user: {
       create: {
-        // Emails listed in ADMIN_EMAILS become super-admins on sign up.
-        before: async (user) => ({
-          data: { ...user, role: env.ADMIN_EMAILS.includes(user.email.toLowerCase()) ? "admin" : "user" },
-        }),
+        // ADMIN_EMAILS become super-admins, but only once the address is verified (e.g. via OAuth).
+        before: async (user) => ({ data: { ...user, role: isAdminEmail(user) ? "admin" : "user" } }),
+      },
+      update: {
+        after: async (user) => {
+          if (isAdminEmail(user) && (user as { role?: string | null }).role !== "admin") {
+            await db.update(schema.user).set({ role: "admin" }).where(eq(schema.user.id, user.id));
+          }
+        },
       },
     },
   },
@@ -126,6 +136,13 @@ export const auth = betterAuth({
           });
         },
         afterRemoveMember: async ({ member, user, organization: org }) => {
+          const { withTenant } = await import("@/lib/db/tenant");
+          await withTenant(org.id, (tx) =>
+            tx
+              .update(schema.apiKey)
+              .set({ revokedAt: new Date() })
+              .where(and(eq(schema.apiKey.createdById, user.id), isNull(schema.apiKey.revokedAt))),
+          );
           const { recordAudit } = await audit();
           await recordAudit({
             organizationId: org.id,

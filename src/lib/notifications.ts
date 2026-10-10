@@ -1,6 +1,6 @@
 import { and, desc, eq, inArray, isNull, ne } from "drizzle-orm";
 
-import { db } from "@/lib/db";
+import { db, type DbOrTx } from "@/lib/db";
 import { member, notification, user } from "@/lib/db/schema";
 
 export interface NotificationInput {
@@ -30,9 +30,10 @@ export async function notifyUserByEmail(email: string, input: NotificationInput)
 export async function notifyOrgAdmins(
   organizationId: string,
   input: NotificationInput,
-  opts: { excludeUserId?: string } = {},
+  opts: { excludeUserId?: string; tx?: DbOrTx } = {},
 ) {
-  const admins = await db
+  const conn = opts.tx ?? db;
+  const admins = await conn
     .select({ userId: member.userId })
     .from(member)
     .where(
@@ -43,7 +44,7 @@ export async function notifyOrgAdmins(
       ),
     );
   if (admins.length === 0) return;
-  await db.insert(notification).values(admins.map((a) => ({ ...input, userId: a.userId, organizationId })));
+  await conn.insert(notification).values(admins.map((a) => ({ ...input, userId: a.userId, organizationId })));
 }
 
 export async function listNotifications(userId: string, limit = 20) {
